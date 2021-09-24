@@ -1,6 +1,6 @@
 ---
 title: "Mmolossus Metabarcoding"
-author: "Edward Hurme, Jenna, Camila"
+author: "Edward, Jenna, Camila"
 date: "9/23/2021"
 output: html_document
 ---
@@ -11,16 +11,16 @@ marker:fwh
 ```{r}
 library(pacman)
 p_load(iNEXT, lme4, car, MASS, lmerTest, effects, multcomp, data.table, 
-       tidyverse, dplyr, install = TRUE)
+       corrplot, spaa, tidyverse, dplyr, bipartite, install = TRUE)
 ```
 
 # read data
 ```{r}
-data <- fread("G#.molossus.txt", stringsAsFactors = TRUE)
-table(paste(data$sex, data$Age, data$roost))
+data <- fread("../../../../Dropbox/MPI/Metabarcoding/data/G#.molossus.txt", stringsAsFactors = TRUE)
 ```
 
-#wet vs dry
+#Include a seasonal effect
+## wet vs dry
 ```{r}
 data$season <- "wet"
 data$season[data$month %in% 1:4] <- "dry"
@@ -44,16 +44,21 @@ data$Age %>% summary
 ```{r}
 summary(data$sex)
 data$sex[data$sex == "female"] <- "f"
+data$sex <- factor(data$sex)
 ```
 
-
+# summarise number of bats of each age and sex class per roost 
+188 individuals
 ```{r}
 data %>% mutate(roost= tolower(roost)) %>% 
   drop_na(sample, roost, sex, Age) -> data 
 data %>% group_by(sample, roost, sex, Age) %>% 
   summarise(n()) %>% 
   group_by(roost, sex, Age) %>% 
-  summarise(n())
+  summarise(count = n())-> sum_bat_class
+sum(sum_bat_class$count)
+
+spread(sum_bat_class %>% group_by(sex, Age) %>% summarise(total = sum(count)), Age, total)
 ```
 
 ## what are identifying units?
@@ -75,12 +80,12 @@ sample.mol$sex %>% table
 # model prey richness against 
 ## mixed model
 ```{r}
-glmer(preyrichness ~ sex * Age + #season + 
+glmer(preyrichness ~ sex * Age + season + 
         (1|roost), data=sample.mol,
       family=poisson)->rich.glmm
 summary(rich.glmm)
 
-glmer(familyrichness ~ sex * Age + #season + 
+glmer(familyrichness ~ sex * Age + season + 
         (1|roost), data=sample.mol,
       family=poisson)->frich.glmm
 summary(frich.glmm)
@@ -109,6 +114,10 @@ plot(effect("Age", frich.glmm, se=T), rescale.axis=FALSE, ylab="Family richness"
 summary(glht(rich.glmm, mcp(sex="Tukey")))
 ```
 
+Only differences found between sex
+We should drop juveniles since they don't cover the same time span
+
+
 #PerMANOVA - Prey composition####
 ##Load packages##
 ```{r}
@@ -118,19 +127,20 @@ p_load(vegan)
 ##create prey composition table##
 
 ```{r}
-sp_composition <- data %>% drop_na(sex, Age) %>% 
+sp_composition <- data %>% 
+  drop_na(sex, Age) %>% 
   filter(diet.status == 'ok') %>%
-  dplyr::select(sample, Species, total.diet.reads, Age, sex) %>%
-  group_by(sample, Species, Age, sex) %>%
+  filter(Age == 'a') %>% 
+  dplyr::select(sample, Species, total.diet.reads, sex) %>%
+  group_by(sample, Species, sex) %>%
   summarise(reads = sum(total.diet.reads)) %>%
   pivot_wider(names_from = Species, values_from = reads) %>%
   mutate_if(is.numeric, replace_na, 0)
 
-summary(sp_composition$Age)
 summary(sp_composition$sex)
 ## Proportion of species reads
 sp_composition_reads <- data.frame(Sample = sp_composition$sample, 
-                                   Age = sp_composition$Age,
+                                   # Age = sp_composition$Age,
                                    Sex = sp_composition$sex,
                                   sp_composition[-c(1:3)]/rowSums(sp_composition[-c(1:3)]))
 
@@ -140,22 +150,24 @@ sp_composition_pa <- sp_composition %>%
 
 ## Proportion of species richness ####
 sp_composition_prop <- data.frame(Sample = sp_composition_pa$sample, 
-                                  Age = sp_composition$Age,
-                                  Sex = sp_composition$sex, sp_composition_pa[-c(1:3)]/rowSums(sp_composition_pa[-c(1:3)]))
+#                                  Age = sp_composition$Age,
+                                  Sex = sp_composition$sex, 
+sp_composition_pa[-c(1:3)]/rowSums(sp_composition_pa[-c(1:3)]))
 ```
 
 ```{r}
 f_composition <- data %>% drop_na(sex, Age, Family) %>% 
   filter(diet.status == 'ok') %>%
-  dplyr::select(sample, Family, total.diet.reads, Age, sex) %>%
-  group_by(sample, Family, Age, sex) %>%
+  filter(Age == 'a') %>%
+  dplyr::select(sample, Family, total.diet.reads, sex) %>%
+  group_by(sample, Family, sex) %>%
   summarise(reads = sum(total.diet.reads)) %>%
   pivot_wider(names_from = Family, values_from = reads) %>%
   mutate_if(is.numeric, replace_na, 0)
 
 ## Proportion of species reads
 f_composition_reads <- data.frame(Sample = f_composition$sample, 
-                                   Age = f_composition$Age,
+                                   #Age = f_composition$Age,
                                    Sex = f_composition$sex,
                                   f_composition[-c(1:3)]/rowSums(f_composition[-c(1:3)]))
 
@@ -165,8 +177,9 @@ f_composition_pa <- f_composition %>%
 
 ## Proportion of species richness ####
 f_composition_prop <- data.frame(Sample = f_composition_pa$sample, 
-                                  Age = f_composition$Age,
-                                  Sex = f_composition$sex, f_composition_pa[-c(1:3)]/rowSums(f_composition_pa[-c(1:3)]))
+                                  #Age = f_composition$Age,
+                                  Sex = f_composition$sex, 
+                                 f_composition_pa[-c(1:3)]/rowSums(f_composition_pa[-c(1:3)]))
 ```
 
 ## create species composition presence absence table
@@ -175,7 +188,7 @@ f_composition_prop <- data.frame(Sample = f_composition_pa$sample,
 
 #Presence/absence#
 ```{r}
-otus <- 4:83
+otus <- 3:ncol(f_composition_pa)
 Ym <- f_composition_pa[,otus] #select only columns with prey
 dist.Y.pa <- vegdist(Ym, method="jaccard")
 
@@ -191,7 +204,7 @@ dist.Y.a <-vegdist(Yma, method="bray")
 #Build PerMANOVA model##
 ##Presence/absence#
 ```{r}
-adonis(dist.Y.pa ~ sex+Age, data=f_composition_pa, 
+adonis(dist.Y.pa ~ sex, data=f_composition_pa, 
        permutations = 999,
        method="binomial")->perm1_m
 perm1_m
@@ -200,7 +213,7 @@ perm1_m
 
 #Abundance (RRA or weighted occurrences)#
 ```{r}
-adonis(dist.Y.a ~ Sex+Age,
+adonis(dist.Y.a ~ Sex,
        data=f_composition_prop, 
        method="bray", permutations=999)->perm2
 perm2
@@ -218,15 +231,7 @@ anova(bdisp.sex)
 plot(bdisp.sex)
 
 ```
-```{r}
-betadisper(dist.Y.pa, f_composition_pa$Age,#Age,
-           type="centroid")->bdisp.Age
-bdisp.Age
 
-anova(bdisp.Age)
-
-plot(bdisp.Age)
-```
 ### abundance
 ```{r}
 betadisper(dist.Y.a, f_composition_prop$Sex,#Age,
@@ -238,22 +243,13 @@ anova(bdispa.sex)
 plot(bdispa.sex)
 
 ```
-```{r}
-betadisper(dist.Y.a, f_composition_prop$Age,#Age,
-           type="centroid")->bdispa.Age
-bdispa.Age
-
-anova(bdispa.Age)
-
-plot(bdispa.Age)
-```
 
 ```{r}
-layout(cbind(c(1,2),c(3,4)))
+layout(rbind(1:2))#,c(3,4)))
 plot(bdisp.sex)
-plot(bdisp.Age)
+#plot(bdisp.Age)
 plot(bdispa.sex)
-plot(bdispa.Age)
+#plot(bdispa.Age)
 ```
 
 
@@ -262,7 +258,7 @@ plot(bdispa.Age)
 ```{r}
 simper(Ym, f_composition_pa$sex, permutations=99)->sim1
 summary(sim1)
-View(sim1)
+# View(sim1)
 ```
 ## abundance
 ```{r}
@@ -284,10 +280,6 @@ sink()
 
 ####Niche-overlap####
 
-##Load Packages##
-```{r}
-p_load(corrplot, spaa)
-```
 
 
 
@@ -315,11 +307,6 @@ corrplot(as.matrix(pianka_FOO), method="shade", type="lower", is.corr=TRUE,
 
 
 ####Bipartite Networks####
-
-##Load Packages##
-```{r}
-library(bipartite)
-```
 
 
 
