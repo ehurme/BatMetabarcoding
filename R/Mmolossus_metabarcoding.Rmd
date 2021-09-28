@@ -48,17 +48,21 @@ data$sex <- factor(data$sex)
 ```
 
 # summarise number of bats of each age and sex class per roost 
-188 individuals
+180 unique samples
 ```{r}
 data %>% mutate(roost= tolower(roost)) %>% 
   drop_na(sample, roost, sex, Age) -> data 
-data %>% group_by(sample, roost, sex, Age) %>% 
+data %>% group_by(sample, roost, sex, Age, season) %>% 
   summarise(n()) %>% 
-  group_by(roost, sex, Age) %>% 
+  group_by(roost, sex, Age, season) %>% 
   summarise(count = n())-> sum_bat_class
 sum(sum_bat_class$count)
 
+sum_bat_class %>% group_by(Age) %>% summarise(total = sum(count))
+
 spread(sum_bat_class %>% group_by(sex, Age) %>% summarise(total = sum(count)), Age, total)
+spread(sum_bat_class %>% group_by(sex, season) %>% summarise(total = sum(count)), season, total)
+
 ```
 
 ## what are identifying units?
@@ -404,25 +408,25 @@ plot(bdispa.sex)
 #Assess which prey are most different##
 ## presence absence
 ```{r}
-simper(Ym, f_composition_pa$sex, permutations=99)->sim1
-summary(sim1)
-# View(sim1)
+# simper(Ym, f_composition_pa$sex, permutations=99)->sim1
+# summary(sim1)
+# # View(sim1)
 ```
 ## abundance
 ```{r}
-simper(Yma, f_composition_prop$Sex, permutations=99)->sim1
-summary(sim1)
-# View(sim1)
-
-sim1$m_f$ava
+# simper(Yma, f_composition_prop$Sex, permutations=99)->sim1
+# summary(sim1)
+# # View(sim1)
+# 
+# sim1$m_f$ava
 
 ```
 
 ##save simper results to readable file#
 ```{r}
-sink(file = "simper_mol_family_presenceabsence_results.txt", append = TRUE)
-summary(sim1)
-sink()
+# sink(file = "simper_mol_family_presenceabsence_results.txt", append = TRUE)
+# summary(sim1)
+# sink()
 ```
 
 
@@ -433,7 +437,7 @@ sink()
 
 ##Load data##
 ```{r}
-read.delim("input.niche.FOO.txt", header=T, row.names=1)->FOO.niche
+# read.delim("input.niche.FOO.txt", header=T, row.names=1)->FOO.niche
 ```
 
 
@@ -441,6 +445,23 @@ read.delim("input.niche.FOO.txt", header=T, row.names=1)->FOO.niche
 
 
 ```{r}
+data %>% drop_na(Family, sex, Age) %>% group_by(Family, sex, Age) %>% 
+  #summarise(count = n()) #-> mfas
+  summarise(count = mean(reads/total.diet.reads)) -> mfas
+mfas$count %>% hist(breaks = 30)
+
+mfas %>% 
+  unite(class, c('sex', 'Age'), sep = '.') %>%
+  group_by(class, Family) %>%
+  summarise(counts = sum(count)) %>%
+  pivot_wider(names_from = class, values_from = counts) %>% 
+  mutate_if(is.numeric, replace_na, 0) -> network.matrix.m
+  # mutate_if(is.numeric, ~1 * (. > 0)) 
+
+network.matrix.m <- as.data.frame(network.matrix.m)
+row.names(network.matrix.m) <- network.matrix.m$Family
+nm <- network.matrix.m[,-1]
+
 niche.overlap(nm, method = "pianka")->pianka_FOO
 pianka_FOO
 ```
@@ -454,11 +475,11 @@ corrplot(as.matrix(pianka_FOO), method="shade", type="lower", is.corr=TRUE,
 
 
 
-####Bipartite Networks####
+#Bipartite Networks####
+## sex vs age
 
 
-
-##Load Data##
+###Load Data##
 ```{r}
 data %>% names
 
@@ -483,35 +504,35 @@ rowSums(nm)
 ```
 
 
-##Plot network##
+###Plot network##
 ```{r}
 plotweb(nm, text.rot=90)
 
 ```
 
 
-##Plot interaction matrix##
+###Plot interaction matrix##
 ```{r}
 visweb(nm)
 
 ```
 
 
-##Calculate species level metrics##
+###Calculate species level metrics##
 ```{r}
 specieslevel(nm)
 
 ```
 
 
-##Calculate network level metrics##
+###Calculate network level metrics##
 ```{r}
 networklevel(nm)
 
 ```
 
 
-##Calculate Modularity##
+###Calculate Modularity##
 ```{r}
 computeModules(nm)
 metaComputeModules(nm, N=100)->network.mod
@@ -526,23 +547,138 @@ network.mod@originalWeb[order(network.mod@originalWeb[,4], decreasing = TRUE),4]
 
 
 
-#Plot Modules#
+###Plot Modules#
 ```{r}
 plotModuleWeb(network.mod)
 
 ```
 
 
-#Calculate cz values#
+###Calculate cz values#
+c refers to the between-modules connectivity
+z refers to within-module degrees
+
 ```{r}
 czvalues(network.mod)
-
 ```
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## sex vs season
+
+
+###Load Data##
+### relative read abundance
+```{r}
+data %>% names
+
+data %>% drop_na(Family, sex, Age) %>% group_by(Family, sex, season) %>% 
+  #summarise(count = n()) #-> mfas
+  summarise(count = mean(reads/total.diet.reads)) -> mfas
+mfas$count %>% hist(breaks = 30)
+
+mfas %>% 
+  unite(class, c('sex', 'season'), sep = '.') %>%
+  group_by(class, Family) %>%
+  summarise(counts = sum(count)) %>%
+  pivot_wider(names_from = class, values_from = counts) %>% 
+  mutate_if(is.numeric, replace_na, 0) -> network.matrix.m
+  # mutate_if(is.numeric, ~1 * (. > 0)) 
+
+network.matrix.m <- as.data.frame(network.matrix.m)
+row.names(network.matrix.m) <- network.matrix.m$Family
+nm <- network.matrix.m[,-1]
+str(nm)
+rowSums(nm)
+```
+
+
+###Plot network##
+```{r}
+plotweb(nm, text.rot=90)
+
+```
+
+
+###Plot interaction matrix##
+```{r}
+visweb(nm)
+
+```
+
+
+###Calculate species level metrics##
+```{r}
+specieslevel(nm)
+
+```
+
+
+###Calculate network level metrics##
+```{r}
+networklevel(nm)
+
+```
+
+
+###Calculate Modularity##
+```{r}
+computeModules(nm)
+metaComputeModules(nm, N=100)->network.mod
+network.mod
+
+network.mod@originalWeb[order(network.mod@originalWeb[,1], decreasing = TRUE),1] # female dry
+network.mod@originalWeb[order(network.mod@originalWeb[,2], decreasing = TRUE),2] # female wet
+network.mod@originalWeb[order(network.mod@originalWeb[,3], decreasing = TRUE),3] # male dry
+network.mod@originalWeb[order(network.mod@originalWeb[,4], decreasing = TRUE),4] # male wet
+```
+
+
+
+###Plot Modules#
+```{r}
+plotModuleWeb(network.mod, rank = FALSE)
+?plotModuleWeb
+```
+
+
+###Calculate cz values#
+c refers to the between-modules connectivity
+z refers to within-module degrees
+
+```{r}
+czvalues(network.mod)
+```
+
+
+```{r}
+data %>% names
+data %>% group_by(Family, sex) %>% summarise(count = n()) %>% pivot_wider(names_from=sex, values_from=count) %>% mutate_if(is.numeric, replace_na, 0) %>% mutate(diff = f-m, abs_diff = abs(f-m))-> fam_dif
+
+fam_dif[order(fam_dif$abs_diff, decreasing = TRUE),]
+```
 
 
 

@@ -11,12 +11,14 @@ marker:fwh
 ```{r}
 library(pacman)
 p_load(iNEXT, lme4, car, MASS, lmerTest, effects, multcomp, data.table, 
-       corrplot, spaa, tidyverse, dplyr, bipartite, install = TRUE)
+       corrplot, spaa, tidyverse, dplyr, bipartite, vegan, install = TRUE)
 ```
 
 # read data
 ```{r}
-data <- fread("/Users/jennakohles/ownCloud/Documents 2/PhD/Coursework/DNA Barcoding in Porto/Molossus data/G#.molossus.txt", stringsAsFactors = TRUE)
+# data <- fread("/Users/jennakohles/ownCloud/Documents 2/PhD/Coursework/DNA Barcoding in Porto/Molossus data/G#.molossus.txt", stringsAsFactors = TRUE)
+data <- fread("../../../../Dropbox/MPI/Metabarcoding/data/G#.molossus.txt", stringsAsFactors = TRUE)
+
 ```
 
 #Include a seasonal effect
@@ -204,8 +206,8 @@ igraph
 # estimateD(sum2, datatype="incidence_freq", base="size", level=10) 
 
 ```
-#sample coverage at the family level is much better, almost at 100%
 
+#sample coverage at the family level is much better, almost at 100%
 ```{r}
 #AGE
 #prepare data
@@ -214,7 +216,7 @@ sum1 <- data %>% group_by(Family, Age) %>%
   pivot_wider(names_from=Age, values_from=count) %>% 
   as.data.frame() %>% 
   mutate_at(c(2:3), as.numeric)
-sum1 <- sum1[-81,] #remove rows/samples with NA for family ID
+sum1 <- sum1[complete.cases(sum1$Family),] #remove rows/samples with NA for family ID
 rownames(sum1) <- sum1[,1]
 colnames(sum1) <- c("Family","adult","juvenile")
 sum2 <- sum1 %>% 
@@ -248,16 +250,17 @@ igraph
 sum1 <- data %>% group_by(Family, Repro_condition) %>% 
   summarize(count = n()) %>% 
   pivot_wider(names_from=Repro_condition, values_from=count) %>% 
-  as.data.frame() %>% 
-  mutate(nonrepro=as.numeric(nonrepro), repro=as.numeric(repro), unknown=as.numeric(unknown))
-sum1 <- sum1[-81,] #remove rows/samples with NA for family ID
+  as.data.frame() # %>% 
+  # mutate(nonrepro=as.numeric(nr), repro=as.numeric(r)) #, unknown=as.numeric(unknown))
+sum1 <- sum1[complete.cases(sum1$Family),] #remove rows/samples with NA for family ID
 rownames(sum1) <- sum1[,1]
-colnames(sum1) <- c("Family","nonrepro","repro","unknown")
+colnames(sum1) <- c("Family","nonrepro","repro") #,"unknown")
 sum2 <- sum1 %>% 
-  dplyr::select(-Family,-unknown) %>% 
-  replace(is.na(.), 0)
+  dplyr::select(-Family) %>% # ,-unknown) %>% 
+  replace(is.na(.), 0) # %>% 
+  # mutate(Total = nonrepro+repro)
 newrow <- c(sum(sum2$nonrepro),sum(sum2$repro))
-sum2 <- rbind(newrow, sum2) 
+sum2 <- rbind(newrow, sum2)
 row.names(sum2)[1] <- "Total"
 
 #calculate curves
@@ -331,7 +334,7 @@ plot(effect("Repro_condition", frich.glmm, se=T), rescale.axis=FALSE, ylab="Fami
 
 ## Compare means per level of variable ##
 ```{r}
-summary(glht(rich.glmm, mcp(sex="Tukey")))
+summary(glht(frich.glmm, mcp(sex="Tukey")))
 ```
 
 Only differences found between sex
@@ -339,10 +342,6 @@ We should drop juveniles since they don't cover the same time span
 
 
 #PerMANOVA - Prey composition####
-##Load packages##
-```{r}
-p_load(vegan)
-```
 
 ##create prey composition table##
 
@@ -376,11 +375,11 @@ sp_composition_pa[-c(1:3)]/rowSums(sp_composition_pa[-c(1:3)]))
 ```
 
 ```{r}
-f_composition <- data %>% drop_na(sex, Age, Family) %>% 
+f_composition <- data %>% drop_na(sex, Repro_condition, Family) %>% 
   filter(diet.status == 'ok') %>%
   filter(Age == 'a') %>%
-  dplyr::select(sample, Family, total.diet.reads, sex) %>%
-  group_by(sample, Family, sex) %>%
+  dplyr::select(sample, Family, total.diet.reads, sex, Repro_condition) %>%
+  group_by(sample, Family, sex, Repro_condition) %>%
   summarise(reads = sum(total.diet.reads)) %>%
   pivot_wider(names_from = Family, values_from = reads) %>%
   mutate_if(is.numeric, replace_na, 0)
