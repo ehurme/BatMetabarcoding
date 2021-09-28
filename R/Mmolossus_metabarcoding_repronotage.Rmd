@@ -16,7 +16,7 @@ p_load(iNEXT, lme4, car, MASS, lmerTest, effects, multcomp, data.table,
 
 # read data
 ```{r}
-data <- fread("../../../../Dropbox/MPI/Metabarcoding/data/G#.molossus.txt", stringsAsFactors = TRUE)
+data <- fread("/Users/jennakohles/ownCloud/Documents 2/PhD/Coursework/DNA Barcoding in Porto/Molossus data/G#.molossus.txt", stringsAsFactors = TRUE)
 ```
 
 #Include a seasonal effect
@@ -31,6 +31,7 @@ data$season %>% summary
 # clean data
 ## clean up age class
 ```{r}
+summary(data$age)
 data$Age <- data$age
 ages <- unique(data$age)
 data$Age[data$age %in% ages[c(1,3,7)]] <- "a"
@@ -45,20 +46,46 @@ data$Age %>% summary
 summary(data$sex)
 data$sex[data$sex == "female"] <- "f"
 data$sex <- factor(data$sex)
+data$sex %>% summary
 ```
 
-# summarise number of bats of each age and sex class per roost 
+## clean up reproductive state
+```{r}
+#initial clean
+data$Repro_state <- data$repro_state
+data$Repro_state <- as.character(data$Repro_state)
+reprostates <- unique(data$repro_state)
+reprostates
+data$Repro_state[data$Repro_state %in% reprostates[c(4,5,6,12,17)]] <- "pregnant"
+data$Repro_state[data$Repro_state %in% reprostates[9]] <- "lactating"
+data$Repro_state[data$Repro_state %in% reprostates[1]] <- "nonrepro"
+data$Repro_state[data$Repro_state %in% reprostates[c(2,15)]] <- "scrotal"
+data$Repro_state[data$Repro_state %in% reprostates[c(3,8,10,11,14)]] <- NA
+data$Repro_state[data$Repro_state %in% reprostates[c(7,13,18)]] <- "postlactating"
+data$Repro_state[data$Repro_state %in% reprostates[16]] <- "nulli"
+#condensing categories more (postlactating and nulli is only written when females are not pregnant or lactating, so it should be the same as non-reproductive)
+data$Repro_condition <- data$Repro_state
+data$Repro_condition <- as.character(data$Repro_condition)
+reprocond <- unique(data$Repro_state)
+reprocond
+data$Repro_condition[data$Repro_condition %in% reprocond[c(1,5,7)]] <- "nr"
+data$Repro_condition[data$Repro_condition %in% reprocond[c(2,4,6)]] <- "r"
+data$Repro_condition <- as.factor(data$Repro_condition)
+summary(data$Repro_condition)
+```
+
+# summarise number of bats of each age and sex class and reproductive condition per roost 
 188 individuals
 ```{r}
 data %>% mutate(roost= tolower(roost)) %>% 
-  drop_na(sample, roost, sex, Age) -> data 
-data %>% group_by(sample, roost, sex, Age) %>% 
+  drop_na(sample, roost, sex, Age, Repro_condition) -> data 
+data %>% group_by(sample, roost, sex, Age, Repro_condition) %>% 
   summarise(n()) %>% 
-  group_by(roost, sex, Age) %>% 
+  group_by(roost, sex, Age, Repro_condition) %>% 
   summarise(count = n())-> sum_bat_class
 sum(sum_bat_class$count)
 
-spread(sum_bat_class %>% group_by(sex, Age) %>% summarise(total = sum(count)), Age, total)
+spread(sum_bat_class %>% group_by(sex, Age, Repro_condition) %>% summarise(total = sum(count)), Age, total)
 ```
 
 ## what are identifying units?
@@ -141,7 +168,7 @@ igraph
 ```
 # Sample coverage is only estimated to be about 60% for prey identified to species level
 
-# next calcuate curves when prey is only identified to family for both sex and age
+# next calcuate curves when prey is only identified to family for both sex and age and reproductive condition
 ```{r}
 #SEX
 #prepare data
@@ -215,28 +242,69 @@ igraph
 
 ```
 #sample coverage at the family level is much better, almost at 100%
+```{r}
+#REPRO CONDITION  
+#prepare data
+sum1 <- data %>% group_by(Family, Repro_condition) %>% 
+  summarize(count = n()) %>% 
+  pivot_wider(names_from=Repro_condition, values_from=count) %>% 
+  as.data.frame() %>% 
+  mutate(nonrepro=as.numeric(nonrepro), repro=as.numeric(repro), unknown=as.numeric(unknown))
+sum1 <- sum1[-81,] #remove rows/samples with NA for family ID
+rownames(sum1) <- sum1[,1]
+colnames(sum1) <- c("Family","nonrepro","repro","unknown")
+sum2 <- sum1 %>% 
+  dplyr::select(-Family,-unknown) %>% 
+  replace(is.na(.), 0)
+newrow <- c(sum(sum2$nonrepro),sum(sum2$repro))
+sum2 <- rbind(newrow, sum2) 
+row.names(sum2)[1] <- "Total"
+
+#calculate curves
+iNEXT(sum2, datatype="incidence_freq", nboot=100)->icurves
+
+icurves
+
+##Save rarefaction curves results##
+#write.table(icurves$iNextEst, "icurves.estimates.txt")
+#write.table(icurves$AsyEst, "icurves.asymptote.txt")
+
+##Plot rarefaction curves##
+igraph<-ggiNEXT(icurves, type = 2)
+igraph
+
+##Estimate richness at certain value of sampling##
+#estimateD(sum2, datatype="incidence_freq", base="size", level=10) 
+
+```
+#sample coverage at the family level is much better, almost at 100%
 
 # summarize species richness by sample
 ```{r}
 names(data)
-data %>% group_by(roost, sample, mass_of_bat, sex, Age, season) %>% 
+data %>% group_by(roost, sample, mass_of_bat, sex, Age, season, Repro_condition) %>% 
   summarise(preyrichness = n(),
             familyrichness = length(unique(Family))) -> sample.mol
 
 sample.mol$sex %>% table
+sample.mol$Repro_condition %>% table
 ```
+
 # model prey richness against 
 ## mixed model
 ```{r}
-glmer(preyrichness ~ sex * Age + season + 
+glmer(preyrichness ~ sex * Age + season + Repro_condition +
         (1|roost), data=sample.mol,
       family=poisson)->rich.glmm
 summary(rich.glmm)
 
-glmer(familyrichness ~ sex * Age + season + 
-        (1|roost), data=sample.mol,
-      family=poisson)->frich.glmm
+glmer(familyrichness ~ sex * Age + season + Repro_condition + (1|roost), 
+      data=sample.mol, family=poisson)->frich.glmm
 summary(frich.glmm)
+
+glmer(familyrichness ~ Repro_condition * sex + season + (1|roost), 
+      data=sample.mol, family=poisson)->frich2.glmm
+summary(frich2.glmm)
 ```
 
 ## plot effect
@@ -255,7 +323,11 @@ plot(effect("sex", frich.glmm, se=T), rescale.axis=FALSE, ylab="Family richness"
 
 plot(effect("Age", frich.glmm, se=T), rescale.axis=FALSE, ylab="Family richness",
      rug=FALSE, colors=palette(c("black","gray75")), cex=1.5, lwd=1)
+
+plot(effect("Repro_condition", frich.glmm, se=T), rescale.axis=FALSE, ylab="Family richness",
+     rug=FALSE, colors=palette(c("black","gray75")), cex=1.5, lwd=1)
 ```
+
 
 ## Compare means per level of variable ##
 ```{r}
@@ -346,7 +418,7 @@ dist.Y.pa <- vegdist(Ym, method="jaccard")
 ```{r}
 Yma <- f_composition[,otus] #select only columns with prey
 dist.Y.a <-vegdist(Yma, method="bray")
-# image(as.matrix(dist.Y.pa))
+#image(as.matrix(dist.Y.pa))
 ```
 
 #Build PerMANOVA model##
@@ -406,13 +478,13 @@ plot(bdispa.sex)
 ```{r}
 simper(Ym, f_composition_pa$sex, permutations=99)->sim1
 summary(sim1)
-# View(sim1)
+#View(sim1)
 ```
 ## abundance
 ```{r}
 simper(Yma, f_composition_prop$Sex, permutations=99)->sim1
 summary(sim1)
-# View(sim1)
+#View(sim1)
 
 sim1$m_f$ava
 
@@ -462,13 +534,13 @@ corrplot(as.matrix(pianka_FOO), method="shade", type="lower", is.corr=TRUE,
 ```{r}
 data %>% names
 
-data %>% drop_na(Family, sex, Age) %>% group_by(Family, sex, Age) %>% 
+data %>% drop_na(Family, sex, Repro_condition) %>% group_by(Family, sex, Repro_condition) %>% 
   #summarise(count = n()) #-> mfas
   summarise(count = mean(reads/total.diet.reads)) -> mfas
 mfas$count %>% hist(breaks = 30)
 
 mfas %>% 
-  unite(class, c('sex', 'Age'), sep = '.') %>%
+  unite(class, c('sex', 'Repro_condition'), sep = '.') %>%
   group_by(class, Family) %>%
   summarise(counts = sum(count)) %>%
   pivot_wider(names_from = class, values_from = counts) %>% 
@@ -518,10 +590,11 @@ metaComputeModules(nm, N=100)->network.mod
 network.mod
 
 
-network.mod@originalWeb[order(network.mod@originalWeb[,1], decreasing = TRUE),1] # female adults
-network.mod@originalWeb[order(network.mod@originalWeb[,2], decreasing = TRUE),2] # female juv
-network.mod@originalWeb[order(network.mod@originalWeb[,3], decreasing = TRUE),3] # male adults
-network.mod@originalWeb[order(network.mod@originalWeb[,4], decreasing = TRUE),4] # male juv
+network.mod@originalWeb[order(network.mod@originalWeb[,1], decreasing = TRUE),1] # female nr adults
+network.mod@originalWeb[order(network.mod@originalWeb[,2], decreasing = TRUE),2] # female r 
+
+network.mod@originalWeb[order(network.mod@originalWeb[,3], decreasing = TRUE),3] # male nr adults
+network.mod@originalWeb[order(network.mod@originalWeb[,4], decreasing = TRUE),4] # male r
 ```
 
 
